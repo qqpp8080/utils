@@ -1,0 +1,164 @@
+public class RequestWrapper extends HttpServletRequestWrapper {
+    private byte[] body;
+
+    public RequestWrapper(HttpServletRequest request) throws IOException {
+        super(request);
+        body = this.toByteArray(request.getInputStream());
+    }
+
+    private byte[] toByteArray(ServletInputStream inputStream) throws IOException {
+        ByteArrayOutputStream out=new ByteArrayOutputStream();
+        byte[] buffer=new byte[1024*4];
+        int n=0;
+        while((n= inputStream.read(buffer))!=-1){
+            out.write(buffer,0,n);
+        }
+        return out.toByteArray();
+    }
+
+    @Override
+    public BufferedReader getReader() throws IOException {
+        return new BufferedReader(new InputStreamReader(getInputStream()));
+    }
+
+    @Override
+    public ServletInputStream getInputStream() throws IOException {
+        final ByteArrayInputStream bais=new ByteArrayInputStream(body);
+        return new ServletInputStream() {
+            @Override
+            public boolean isFinished() {
+                return false;
+            }
+
+            @Override
+            public boolean isReady() {
+                return false;
+            }
+
+            @Override
+            public void setReadListener(ReadListener readListener) {
+
+            }
+
+            @Override
+            public int read() throws IOException {
+                return bais.read();
+            }
+        };
+    }
+
+    public byte[] getBody() {
+        return body;
+    }
+
+    public void setBody(byte[] data){
+        body=data;
+    }
+}
+
+------------------------------------------------------------------
+public class ResponseWrapper extends HttpServletResponseWrapper {
+    private ByteArrayOutputStream byteArrayOutputStream;
+    private ServletOutputStream servletOutputStream;
+    private PrintWriter writer;
+
+
+
+    public ResponseWrapper(HttpServletResponse response) {
+        super(response);
+        byteArrayOutputStream=new ByteArrayOutputStream();
+        servletOutputStream=new WapperedOutputStream(byteArrayOutputStream);
+        writer = new PrintWriter(new OutputStreamWriter(byteArrayOutputStream,StandardCharsets.UTF_8));
+    }
+
+    @Override
+    public ServletOutputStream getOutputStream(){
+        return servletOutputStream;
+    }
+
+    @Override
+    public PrintWriter getWriter() {
+        return writer;
+    }
+
+    @Override
+    public void flushBuffer(){
+        if (servletOutputStream!=null){
+            try {
+                servletOutputStream.flush();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        if (writer!=null)
+            writer.flush();
+    }
+
+    @Override
+    public void reset() {
+        byteArrayOutputStream.reset();
+    }
+
+    public String getResponseData(String charset) throws IOException {
+        flushBuffer();
+        byte[] bytes = byteArrayOutputStream.toByteArray();
+        return new String(bytes,charset);
+    }
+
+    private class WapperedOutputStream extends ServletOutputStream{
+
+        private ByteArrayOutputStream bos;
+
+        public WapperedOutputStream(ByteArrayOutputStream stream){
+            bos = stream;
+        }
+
+        @Override
+        public boolean isReady() {
+            return false;
+        }
+
+        @Override
+        public void setWriteListener(WriteListener writeListener) {
+
+        }
+
+        @Override
+        public void write(int b){
+            bos.write(b);
+        }
+    }
+
+    public byte[] getContent(){
+        flushBuffer();
+        return byteArrayOutputStream.toByteArray();
+    }
+}
+
+----------------------------------------------------------------------------
+public class RequestWrapperFilter implements Filter {
+
+    @Override
+    public void doFilter(ServletRequest servletRequest, ServletResponse servletResponse, FilterChain filterChain) throws IOException, ServletException {
+        RequestWrapper requestWrapper = new RequestWrapper((HttpServletRequest) servletRequest);
+        ResponseWrapper responseWrapper = new ResponseWrapper((HttpServletResponse) servletResponse);
+        //获取post的值
+        String body = IOUtils.toString(requestWrapper.getBody(), "UTF-8");
+        //中间处理操作省略,生成newBody
+        String newBody= .......//省略代码
+        //修改body以后,想将修改body的值传入到RequestWrapper,如果没有修改,则可以无视,我这里要预设id
+        requestWrapper.setBody(newBody);
+
+
+        filterChain.doFilter(requestWrapper,responseWrapper);
+        byte[] content = responseWrapper.getContent();
+        //获取response的值
+        String responseData = IOUtils.toString(content, "UTF-8");
+
+        //注意 此处是servletResponse 不是responseWrapper,写responseWrapper的话 依旧响应不了
+        ServletOutputStream outputStream = servletResponse.getOutputStream();
+        outputStream.write(content);
+        outputStream.flush();
+        outputStream.close();
+    }
+}
